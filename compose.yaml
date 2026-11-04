@@ -1,0 +1,205 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dopplertrack-web:0.1.0
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
+    restart: unless-stopped
+    init: true
+    environment:
+      DOPPLERTRACK_ENV: production
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /uploads
+      DATA_DIR: /data/jobs
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-4096}
+      MAX_DURATION_SECONDS: ${MAX_DURATION_SECONDS:-3600}
+      MAX_QUEUE: ${MAX_QUEUE:-2}
+      RETENTION_SECONDS: ${RETENTION_SECONDS:-86400}
+      ANALYSIS_TIMEOUT_SECONDS: ${ANALYSIS_TIMEOUT_SECONDS:-7200}
+      UPLOAD_SESSION_TTL_SECONDS: ${UPLOAD_SESSION_TTL_SECONDS:-14400}
+      MIN_FREE_DISK_GB: ${MIN_FREE_DISK_GB:-10}
+      # Keep pinned app dependencies ahead of the production host's injected APM packages.
+      PYTHONPATH: /usr/local/lib/python3.13/site-packages
+      HTTP_PROXY: http://url-egress:3128
+      HTTPS_PROXY: http://url-egress:3128
+      http_proxy: http://url-egress:3128
+      https_proxy: http://url-egress:3128
+      NO_PROXY: localhost,127.0.0.1,::1,redis,url-egress,dopplertrack-web
+      no_proxy: localhost,127.0.0.1,::1,redis,url-egress,dopplertrack-web
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:?Set the Cloudflare Access team domain in .env}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:?Set the Cloudflare Access application AUD in .env}
+    ports:
+      - "127.0.0.1:8765:8000"
+    volumes:
+      - app-data:/data
+      - temporary-uploads:/uploads
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    mem_limit: 384m
+    cpus: 0.50
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      redis:
+        condition: service_healthy
+      url-egress:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      private: {}
+      proxy:
+        aliases:
+          - dopplertrack-web
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dopplertrack-worker:0.1.0
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    init: true
+    environment:
+      DOPPLERTRACK_ENV: production
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /uploads
+      DATA_DIR: /data/jobs
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-4096}
+      MAX_DURATION_SECONDS: ${MAX_DURATION_SECONDS:-3600}
+      RETENTION_SECONDS: ${RETENTION_SECONDS:-86400}
+      ANALYSIS_TIMEOUT_SECONDS: ${ANALYSIS_TIMEOUT_SECONDS:-7200}
+      UPLOAD_SESSION_TTL_SECONDS: ${UPLOAD_SESSION_TTL_SECONDS:-14400}
+      MIN_FREE_DISK_GB: ${MIN_FREE_DISK_GB:-10}
+      # Keep pinned app dependencies ahead of the production host's injected APM packages.
+      PYTHONPATH: /usr/local/lib/python3.13/site-packages
+      URL_IMPORT_PROXY: http://url-egress:3128
+      DENO_DIR: /tmp/deno
+      DENO_NO_UPDATE_CHECK: "1"
+      HTTP_PROXY: http://url-egress:3128
+      HTTPS_PROXY: http://url-egress:3128
+      http_proxy: http://url-egress:3128
+      https_proxy: http://url-egress:3128
+      NO_PROXY: localhost,127.0.0.1,::1,redis,url-egress
+      no_proxy: localhost,127.0.0.1,::1,redis,url-egress
+      ADSB_HISTORY_ENABLED: ${ADSB_HISTORY_ENABLED:-false}
+    volumes:
+      - app-data:/data
+      - temporary-uploads:/uploads
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    mem_limit: 640m
+    cpus: 1.00
+    pids_limit: 64
+    depends_on:
+      redis:
+        condition: service_healthy
+      url-egress:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - private
+
+  url-egress:
+    build:
+      context: .
+      dockerfile: Dockerfile.egress
+    image: dopplertrack-egress:0.1.0
+    command: ["python", "-m", "app.egress_proxy"]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 32
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',3128),timeout=2); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - private
+      - internet
+
+  redis:
+    image: redis:8.8.4-alpine3.23
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction", "--loglevel", "warning"]
+    volumes:
+      - redis-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "999:999"
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 32
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - private
+
+volumes:
+  app-data:
+  temporary-uploads:
+  redis-data:
+
+networks:
+  private:
+    driver: bridge
+    internal: true
+  proxy:
+    external: true
+    name: dopplertrack-proxy
+  internet:
+    driver: bridge

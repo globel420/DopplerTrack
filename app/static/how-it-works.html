@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="How aircraft sound can reveal where a video was recorded, how well it really works, and how to build your own version.">
+  <title>How It Works · DopplerTrack</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M3 9c9 0 9 1 13 7s4 7 13 7' fill='none' stroke='%23e08a1e' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="how-it-works.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="DopplerTrack home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 9c9 0 9 1 13 7s4 7 13 7"/></svg>
+      <span>DopplerTrack</span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="./" data-nav="primary">Analyze</a>
+      <a href="how-it-works" aria-current="page">How it works</a>
+    </nav>
+  </header>
+
+  <main id="main" class="page">
+    <div class="article-hero">
+      <p class="eyebrow">A plain-language guide</p>
+      <h1>How a passing plane can give away where a video was filmed</h1>
+      <p class="lede">The idea is simple enough to explain in a minute. Making it reliable is hard, and nobody has fully managed it yet. This page covers both, and shows how to try it yourself.</p>
+      <nav class="toc" aria-label="On this page">
+        <a href="#idea">The idea</a>
+        <a href="#try">Try it</a>
+        <a href="#steps">The steps</a>
+        <a href="#two">Why two planes</a>
+        <a href="#results">Does it work?</a>
+        <a href="#build">Build your own</a>
+        <a href="#protect">Protect your videos</a>
+      </nav>
+    </div>
+
+    <div class="article">
+      <section id="idea">
+        <h2>The idea</h2>
+        <p>Propeller planes give off a steady hum, often somewhere around 50 to 300 Hz. It can be faint enough that you'd never notice it, but microphones still record it.</p>
+        <p>As a plane passes, that hum slides downward, like the siren of a passing ambulance. This is the <strong>Doppler effect</strong>. The shape of the slide depends on how fast the plane was going and how close it came.</p>
+        <p>Public flight-tracking data records where planes were at each moment. So if you know roughly when and where a video was made, you can ask: <em>at which spot on the map would those real flights have sounded exactly like this?</em></p>
+      </section>
+
+      <section id="try">
+        <h2>Try it</h2>
+        <p>Move the sliders to see how speed and distance change the curve.</p>
+        <div class="demo">
+          <svg class="demo-plot" viewBox="0 0 660 240" role="img" aria-label="Graph of pitch falling over four minutes as a plane passes">
+            <line class="demo-grid" x1="40" x2="650" y1="12" y2="12"/>
+            <line class="demo-grid" x1="40" x2="650" y1="107" y2="107"/>
+            <line class="demo-grid" x1="40" x2="650" y1="202" y2="202"/>
+            <line class="demo-grid" x1="345" x2="345" y1="12" y2="202"/>
+            <polyline id="demoCurve" class="demo-curve" points=""/>
+            <text id="demoTop" class="demo-axis" x="0" y="17"></text>
+            <text id="demoBottom" class="demo-axis" x="0" y="206"></text>
+            <text class="demo-axis" x="40" y="224">2 min before</text>
+            <text class="demo-axis" x="345" y="224" text-anchor="middle">closest point</text>
+            <text class="demo-axis" x="650" y="224" text-anchor="end">2 min after</text>
+          </svg>
+          <div class="demo-controls">
+            <label for="demoSpeed">Speed <output id="demoSpeedOut"></output><input id="demoSpeed" type="range" min="40" max="130" step="5" value="90"></label>
+            <label for="demoDistance">Closest distance <output id="demoDistanceOut"></output><input id="demoDistance" type="range" min="0.3" max="8" step="0.1" value="3"></label>
+            <label for="demoTone">Engine tone <output id="demoToneOut"></output><input id="demoTone" type="range" min="60" max="300" step="5" value="134"></label>
+          </div>
+          <div class="demo-actions">
+            <button id="demoPlay" class="button button-secondary" type="button">Play this flyover</button>
+            <span id="demoSummary" aria-live="polite"></span>
+          </div>
+        </div>
+        <p class="help">The sound plays four minutes of flyover in eight seconds, so it slides much faster than a real pass.</p>
+      </section>
+
+      <section id="steps">
+        <h2>The steps</h2>
+        <ol class="pipeline">
+          <li><strong>Pull out the sound.</strong><span>The picture isn't used. Only the audio track is decoded.</span></li>
+          <li><strong>Draw a picture of the sound.</strong><span>A spectrogram shows pitch over time. A steady hum makes a line; a passing plane makes a line that bends down.</span></li>
+          <li><strong>Trace the curves.</strong><span>Software follows those lines and records pitch at each moment. Sirens, engines and traffic can look similar, so a curve is only a candidate.</span></li>
+          <li><strong>Get the flight history.</strong><span>Using the recording's time and a rough area, fetch the tracks of nearby flights.</span></li>
+          <li><strong>Test spots on a map.</strong><span>For each spot and flight, predict the curve a microphone there would have heard, allowing for the seconds that sound takes to arrive.</span></li>
+          <li><strong>Compare and rank.</strong><span>The engine's true tone is unknown, so it's fitted for each curve. All curves must share one recorder clock.</span></li>
+          <li><strong>Answer, or refuse to.</strong><span>If too few planes fit, or another spot fits nearly as well, the honest answer is “undetermined”.</span></li>
+        </ol>
+        <h3>The formula</h3>
+        <p>Sound heard at time <code>t</code> left the plane earlier, at time <code>τ</code>. What matters is the plane's motion at that earlier moment.</p>
+        <pre><code>t = τ + r(τ) / c                 sound arrives after travelling distance r
+f(t) = f₀ × c / (c + u(τ))       heard pitch; u is the speed moving away from you</code></pre>
+        <p><code>f₀</code> is the engine's true tone and <code>c</code> is the speed of sound.</p>
+      </section>
+
+      <section id="two">
+        <h2>Why one plane isn't enough</h2>
+        <p>A curve tells you how far away a plane passed, but not on which side. One straight pass leaves two equally good answers, one on each side of the flight path. A second plane on a different heading picks between them.</p>
+        <svg class="diagram" viewBox="0 0 660 250" role="img" aria-label="Plane A's path has a possible band on each side. Plane B's path crosses one band, marking the single spot that fits both.">
+          <rect class="d-band" x="20" y="55" width="620" height="26"/>
+          <rect class="d-band" x="20" y="169" width="620" height="26"/>
+          <line class="d-line" x1="20" x2="640" y1="125" y2="125"/>
+          <rect class="d-band" x="418" y="10" width="26" height="230"/>
+          <rect class="d-band" x="536" y="10" width="26" height="230"/>
+          <line class="d-line2" x1="490" x2="490" y1="10" y2="240"/>
+          <circle class="d-spot" cx="431" cy="68" r="8"/>
+          <circle class="d-ghost" cx="431" cy="182" r="8"/>
+          <circle class="d-ghost" cx="549" cy="68" r="8"/>
+          <circle class="d-ghost" cx="549" cy="182" r="8"/>
+          <text class="d-strong" x="26" y="118">Plane A's path</text>
+          <text x="26" y="48">Could be up here…</text>
+          <text x="26" y="212">…or down here</text>
+          <text class="d-strong" x="498" y="28">Plane B</text>
+          <text class="d-strong" x="222" y="72" text-anchor="start">One spot fits both →</text>
+        </svg>
+        <p>Replications have also found that geometry matters as much as sound quality. Planes passing <strong>low and off to one side</strong> pin down a location sharply. Planes passing high and <strong>almost directly overhead</strong> barely change as you move the microphone, which can leave kilometres of doubt. Flights all following one runway line don't resolve the two-sided problem either.</p>
+        <h3>What makes a recording usable</h3>
+        <ul>
+          <li><strong>Length:</strong> long recordings catch more flyovers. Published demonstrations mostly use around an hour or more.</li>
+          <li><strong>Aircraft type:</strong> propeller planes work best. Jets mostly help only near airports.</li>
+          <li><strong>Known time:</strong> the start time, ideally to within seconds.</li>
+          <li><strong>Untouched sound:</strong> heavy noise suppression can erase the hum.</li>
+          <li><strong>Coverage:</strong> the plane has to be in the flight data, and many small aircraft aren't.</li>
+        </ul>
+      </section>
+
+      <section id="results">
+        <h2>Does it really work?</h2>
+        <p>Sometimes, under good conditions. The method drew wide attention through a <a href="https://www.youtube.com/watch?v=UytYrhYLOKI">video by Colsto</a>, whose code isn't public. Coverage reports a location within about 100 m. Independent projects have since tried it, with mixed results. These are the projects' own reports, not peer-reviewed studies.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Project</th><th scope="col">Best reported</th><th scope="col">The catch</th></tr></thead>
+            <tbody>
+              <tr><td><a href="https://github.com/mjshiggins/dopplertrack">mjshiggins/dopplertrack</a></td><td>43 m, and 592 m</td><td>Two recordings with known answers</td></tr>
+              <tr><td><a href="https://github.com/Espaye/aircraft-doppler">Espaye/aircraft-doppler</a></td><td>17 m and 114 m, blind</td><td>One site, two recordings</td></tr>
+              <tr><td><a href="https://github.com/1337isnot1337/DOPPLERGEIST">DOPPLERGEIST</a></td><td>476 m, automatic</td><td>Inconclusive; inferred reference</td></tr>
+              <tr><td><a href="https://github.com/mojomast/hermes-aircraft-doppler-geolocation">hermes plugin</a></td><td>2 of 18 under 3 km</td><td>“Mostly fails on unseen clips”</td></tr>
+              <tr><td><a href="https://github.com/Bodila51/colsto-leak-and-mask">colsto-leak-and-mask</a></td><td>Colsto's town matched</td><td>No blind webcam case located</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note"><strong>Where DopplerTrack stands:</strong> it has only passed synthetic tests built from its own model. It has never located a real recording with a known answer, so treat any coordinate it gives as an untested lead.</p>
+
+        <h3>What DOPPLERGEIST adds</h3>
+        <p><a href="https://github.com/1337isnot1337/DOPPLERGEIST">DOPPLERGEIST</a> by Cinna Davis is the most thoroughly documented independent attempt. Its reports are useful because they publish failures as well as successes. Some of its findings:</p>
+        <ul>
+          <li><strong>Automatic discovery:</strong> found candidate sound groups in 36 of 40 real smartphone recordings. It labels these proposals, not confirmed aircraft.</li>
+          <li><strong>Failures count:</strong> of five public field recordings, three gave rankings with nothing within 1 km of the reported site, and two gave nothing.</li>
+          <li><strong>A ranked guess isn't an accepted location:</strong> it keeps the two apart, and can report a leading spot while still answering “inconclusive”.</li>
+          <li><strong>Refuse without a defensible time:</strong> with no credible recording-time window, it asks for one instead of assuming a date.</li>
+          <li><strong>Better measuring:</strong> it uses a long 2-second analysis window on low-rate audio, and follows curves with bounded jumps.</li>
+          <li><strong>Better physics inputs:</strong> ground height from terrain data and GPS-based aircraft altitude, instead of assuming sea level.</li>
+        </ul>
+        <p>Its project status says plainly: “no independently accepted blind real-recording localization has yet been established.” It's <a href="https://github.com/1337isnot1337/DOPPLERGEIST/blob/main/LICENSE">source-available for noncommercial use</a> (PolyForm Noncommercial 1.0.0), so read its terms before reusing its code. This project uses none of its code.</p>
+      </section>
+
+      <section id="build">
+        <h2>Build your own</h2>
+        <p>Pick the route that matches how far you want to go.</p>
+
+        <h3>Route 1: see the geometry in one minute</h3>
+        <p><a href="https://github.com/globel420/DopplerTrack/blob/main/examples/minimal_doppler_match.py">This short script</a> hides a microphone, predicts what it would hear from two planes, then finds it again. It only needs NumPy.</p>
+        <pre><code>pip install numpy
+python examples/minimal_doppler_match.py</code></pre>
+
+        <h3>Route 2: run DopplerTrack on your own machine</h3>
+        <p>You'll need Python 3.13, FFmpeg and Redis. Development mode has <strong>no login</strong>, so keep it on your own computer.</p>
+        <pre><code>git clone https://github.com/globel420/DopplerTrack.git
+cd DopplerTrack
+python -m venv .venv &amp;&amp; . .venv/bin/activate
+pip install --require-hashes -r requirements.lock
+uvicorn app.main:app --port 8765     # and in a second terminal:
+python -m app.worker</code></pre>
+
+        <h3>Route 3: put it on your own site</h3>
+        <p>The repository includes a Docker Compose setup. Before going public, you'll want:</p>
+        <ul>
+          <li><strong>A login in front of it.</strong> DopplerTrack expects <a href="https://developers.cloudflare.com/cloudflare-one/">Cloudflare Access</a> and checks its token on every request. To use something else, replace <code>app/access.py</code>.</li>
+          <li><strong>A background worker and queue.</strong> Analysis takes minutes, so never run it inside a web request.</li>
+          <li><strong>Limits.</strong> Cap file size, length, disk use and uploads per person.</li>
+          <li><strong>Automatic deletion</strong> of uploads and results.</li>
+          <li><strong>A locked-down downloader</strong> if you accept links, so nobody can make your server fetch its own private addresses.</li>
+          <li><strong>Consent</strong> before sending the time and area to any outside service.</li>
+        </ul>
+
+        <h3>Route 4: write it from scratch</h3>
+        <p>The heart of it is one function that predicts a pitch curve for one candidate spot:</p>
+        <pre><code>def received_ratio(track, microphone, heard_at):
+    emitted_at = heard_at.copy()
+    for _ in range(6):                     # sound left the plane earlier
+        distance = norm(position(track, emitted_at) - microphone, axis=1)
+        emitted_at = heard_at - distance / SOUND_SPEED
+    offset = position(track, emitted_at) - microphone
+    receding = (offset @ velocity(track)) / norm(offset, axis=1)
+    return SOUND_SPEED / (SOUND_SPEED + receding)</code></pre>
+        <p>Multiply that ratio by a fitted engine tone, compare it with your measured curve, and repeat across a map grid. Around that, you'll need:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Piece</th><th scope="col">A good place to start</th></tr></thead>
+            <tbody>
+              <tr><td>Audio</td><td>FFmpeg, mono, about 4 kHz</td></tr>
+              <tr><td>Spectrogram</td><td>About 1–2 s windows, 40–700 Hz</td></tr>
+              <tr><td>Curve tracing</td><td>Viterbi path, with a way to say “no tone”</td></tr>
+              <tr><td>Flight history</td><td><a href="https://www.adsb.lol/docs/open-data/historical">ADSB.lol daily files</a> (ODbL) or <a href="https://adsb.aero/llms.txt">ADSB.aero</a></td></tr>
+              <tr><td>Sound speed</td><td>From air temperature, not a fixed number</td></tr>
+              <tr><td>Heights</td><td>Terrain data for the ground, GPS altitude for the plane</td></tr>
+              <tr><td>Map search</td><td>Fine grid first (200 m), then refine</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Test it so you can trust it</h3>
+        <p>The most common mistake is believing a good fit. A search over many flights and spots will always find a best answer, even in pure noise. Before you trust any result:</p>
+        <ul>
+          <li><strong>Feed it noise.</strong> Noise must never produce an accepted location.</li>
+          <li><strong>Shift the time.</strong> Run the search with the wrong clock, say 30 minutes off. If that scores as well as the real time, your result means nothing.</li>
+          <li><strong>Drop one plane.</strong> If removing one flyover moves the answer a long way, it isn't stable.</li>
+          <li><strong>Write down your answer before checking it</strong> against recordings whose true location you know.</li>
+          <li><strong>Report the failures.</strong> Your error rate is the number that matters.</li>
+        </ul>
+      </section>
+
+      <section id="protect">
+        <h2>Using it responsibly, and protecting your own videos</h2>
+        <p>This technique can reveal where someone lives or works from a video they thought was anonymous. Use it on recordings you have the right to analyze, for research, verification or your own footage. Don't use it to find or follow a person.</p>
+        <p>If you're worried about your own recordings:</p>
+        <ul>
+          <li><strong>Removing or replacing the audio</strong> is the only certain fix for this particular leak.</li>
+          <li><strong>An ordinary low-cut filter may not be enough.</strong> One <a href="https://github.com/cbonitz/doppler-experiments">synthetic study</a> found it has no effect once software normalizes each frequency, because the tone and the noise around it drop together.</li>
+          <li><strong>Notching out the tones</strong> is offered by <a href="https://github.com/Bodila51/colsto-leak-and-mask">one tool</a>, but its effectiveness hasn't been measured.</li>
+          <li><strong>Strip file metadata</strong> too, since it can hold GPS and the date.</li>
+          <li><strong>Remember the picture:</strong> signs and buildings can give away a place on their own.</li>
+        </ul>
+      </section>
+
+      <section id="credits">
+        <h2>Credits</h2>
+        <p class="sources">Method demonstrated by <a href="https://www.youtube.com/watch?v=UytYrhYLOKI">Colsto</a>. Written up by <a href="https://simonwillison.net/2026/Nov/3/a-sound-that-leaks-your-exact-location/">Simon Willison</a>. Independent work: <a href="https://github.com/1337isnot1337/DOPPLERGEIST">DOPPLERGEIST</a>, <a href="https://github.com/mjshiggins/dopplertrack">mjshiggins/dopplertrack</a>, <a href="https://github.com/Espaye/aircraft-doppler">Espaye/aircraft-doppler</a>, <a href="https://github.com/teamchong/doppler-geo">doppler-geo</a>, <a href="https://github.com/mojomast/hermes-aircraft-doppler-geolocation">hermes plugin</a>, <a href="https://github.com/Bodila51/colsto-leak-and-mask">colsto-leak-and-mask</a>, <a href="https://github.com/cbonitz/doppler-experiments">doppler-experiments</a>. Flight data: <a href="https://www.adsb.lol/docs/open-data/historical">ADSB.lol contributors</a>, <a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL 1.0</a>.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>DopplerTrack is experimental software. Results can be wrong and shouldn't be the only basis for locating anything or anyone.</p>
+  </footer>
+</body>
+</html>

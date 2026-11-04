@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>DopplerTrack</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M3 9c9 0 9 1 13 7s4 7 13 7' fill='none' stroke='%23e08a1e' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="DopplerTrack home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 9c9 0 9 1 13 7s4 7 13 7"/></svg>
+      <span>DopplerTrack</span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="/" aria-current="page">Analyze</a>
+      <a href="/how-it-works">How it works</a>
+    </nav>
+  </header>
+
+  <main id="main" class="page">
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-copy">
+        <p class="eyebrow">Experimental · sound only</p>
+        <h1 id="page-title">Where was this video recorded?</h1>
+        <p class="lede">Passing aircraft leave a faint falling hum in a video's sound. DopplerTrack measures it and checks which spot on the map would have heard real flights that way. If the evidence is thin, it says it doesn't know.</p>
+      </div>
+      <svg class="hero-curve" viewBox="0 0 320 150" role="img" aria-label="A pitch curve falling smoothly as an aircraft passes">
+        <line class="hero-grid" x1="0" x2="320" y1="37" y2="37"/>
+        <line class="hero-grid" x1="0" x2="320" y1="75" y2="75"/>
+        <line class="hero-grid" x1="0" x2="320" y1="113" y2="113"/>
+        <path class="hero-path" d="M0 30C90 31 125 36 160 75S230 119 320 120"/>
+        <circle class="hero-dot" cx="160" cy="75" r="5"/>
+        <text class="hero-label" x="168" y="66">plane passes</text>
+        <text class="hero-label" x="0" y="20">higher pitch</text>
+        <text class="hero-label" x="320" y="142" text-anchor="end">lower pitch</text>
+      </svg>
+    </section>
+
+    <ol class="stepper" id="stepper" aria-label="Progress">
+      <li data-step="1" aria-current="step"><span>1</span>Add a video</li>
+      <li data-step="2"><span>2</span>Check the sound</li>
+      <li data-step="3"><span>3</span>See the result</li>
+    </ol>
+
+    <div id="progressPanel" class="progress-panel" hidden aria-live="polite">
+      <div class="progress-topline"><span id="progressLabel">Preparing upload</span><span id="progressPercent">0%</span></div>
+      <progress id="progressBar" max="100" value="0">0%</progress>
+      <div class="progress-actions">
+        <button id="cancelButton" class="text-button" type="button">Cancel</button>
+        <button id="retryButton" class="text-button" type="button" hidden>Try again</button>
+      </div>
+    </div>
+    <p id="errorMessage" class="error-message" role="alert" hidden></p>
+
+    <section class="card" id="step1" aria-labelledby="upload-title">
+      <h2 id="upload-title">Add a video</h2>
+      <div class="tabs" role="tablist" aria-label="Video source">
+        <button class="tab" id="tabFile" role="tab" type="button" aria-selected="true" aria-controls="panelFile">Upload a file</button>
+        <button class="tab" id="tabLink" role="tab" type="button" aria-selected="false" aria-controls="panelLink" tabindex="-1">Paste a link</button>
+      </div>
+
+      <div id="panelFile" role="tabpanel" aria-labelledby="tabFile">
+        <label class="drop-zone" id="dropZone" for="videoFile" tabindex="0">
+          <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0-4 4m4-4 4 4M5 19h14"/></svg>
+          <span class="drop-title">Drop a video here, or click to choose</span>
+          <input id="videoFile" class="visually-hidden" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mp4,.mov,.mkv,.webm">
+          <span id="fileSummary" class="file-summary" aria-live="polite">MP4, MOV, MKV or WebM · up to 4 GiB · up to 1 hour</span>
+        </label>
+        <div class="actions">
+          <button id="quickButton" class="button button-primary" type="button" disabled>Check the sound</button>
+        </div>
+      </div>
+
+      <div id="panelLink" role="tabpanel" aria-labelledby="tabLink" hidden>
+        <label class="field-label" for="mediaUrl">Video page or media link</label>
+        <div class="url-row">
+          <input id="mediaUrl" type="url" placeholder="https://example.com/video.mp4" aria-describedby="urlHelp">
+          <button id="urlImportButton" class="button button-primary" type="button">Check the sound</button>
+        </div>
+        <p id="urlHelp" class="help">A public video-page or direct media link. Pages that need a sign-in aren't supported, and the same size and length limits apply.</p>
+      </div>
+      <p class="help privacy-line">Only the sound is analyzed, not the picture. Your video stays on this server and is deleted automatically within 24 hours.</p>
+    </section>
+
+    <section id="results" class="card" aria-labelledby="results-title" hidden>
+      <h2 id="results-title">Is there anything to work with?</h2>
+      <div id="resultBanner" class="verdict"></div>
+      <div class="tiles">
+        <article class="tile"><span class="tile-label">Audio</span><strong id="audioValue">—</strong><p id="audioDetail"></p></article>
+        <article class="tile"><span class="tile-label">Recording quality</span><strong id="qualityValue">—</strong><p id="qualityDetail"></p></article>
+        <article class="tile"><span class="tile-label">Moving tones found</span><strong id="featureValue">—</strong><p id="featureDetail"></p></article>
+      </div>
+      <figure class="plot">
+        <figcaption><strong>Sound over time</strong> Bright lines are steady tones. An aircraft shows up as a line that slowly bends downward.</figcaption>
+        <div class="plot-frame"><img id="quickPlot" alt="Spectrogram of the recording from the quick check. Brighter areas are louder." hidden></div>
+      </figure>
+      <details class="more">
+        <summary>Why this result?</summary>
+        <div id="reasonsBlock"></div>
+      </details>
+
+      <div class="next-card" id="deepCard">
+        <h3>Next: measure the curves</h3>
+        <p id="deepPrompt">A closer scan measures each curve. Stop there, or also compare them with flight history to look for a location.</p>
+
+        <label class="switch-row">
+          <input id="wantLocation" type="checkbox">
+          <span class="switch" aria-hidden="true"></span>
+          <span><strong>Also try to find the location</strong><small>Needs the time it was recorded and a rough area.</small></span>
+        </label>
+
+        <fieldset id="locationFields" class="location-fields" hidden>
+          <legend class="visually-hidden">Recording time and search area</legend>
+          <div class="field-grid">
+            <div class="field wide">
+              <label class="field-label" for="recordedLocal">When did this clip start?</label>
+              <div class="inline-inputs">
+                <input id="recordedLocal" type="datetime-local" step="1">
+                <select id="recordedOffset" aria-label="UTC offset of that time"></select>
+              </div>
+              <p class="help">Use the time on the recording, never the upload time.</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="timeUncertainty">How exact is that time?</label>
+              <select id="timeUncertainty">
+                <option value="10">Within 10 seconds</option>
+                <option value="30" selected>Within 30 seconds</option>
+                <option value="60">Within 1 minute</option>
+                <option value="300">Within 5 minutes</option>
+                <option value="600">Within 10 minutes</option>
+              </select>
+            </div>
+            <div class="field wide">
+              <label class="field-label" for="centerCoords">Center of the area to search</label>
+              <input id="centerCoords" type="text" inputmode="text" autocomplete="off" placeholder="38.5816, -121.4944" aria-describedby="coordsHelp">
+              <p class="help" id="coordsHelp">Latitude, longitude. You can paste this from most map apps.</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="searchRadius">Search radius (km)</label>
+              <input id="searchRadius" type="number" min="0.5" max="50" step="0.5" value="10">
+            </div>
+          </div>
+          <label class="check-row">
+            <input id="flightLookupConsent" type="checkbox">
+            <span>Send the time, clip length, time accuracy and area to <a href="https://adsb.aero/llms.txt" target="_blank" rel="noopener noreferrer">ADSB.aero</a> to look up flights. Your video and audio are never sent.</span>
+          </label>
+          <p class="help">Flight tracks come from the <a href="https://www.adsb.lol/docs/open-data/historical" target="_blank" rel="noopener noreferrer">ADSB.lol archive</a>, licensed under <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener noreferrer">ODbL 1.0</a>.</p>
+        </fieldset>
+
+        <label id="overrideLabel" class="check-row" hidden><input id="manualOverride" type="checkbox"> <span>The quick check wasn't sure. Scan anyway.</span></label>
+        <p id="deepError" class="error-message" role="alert" hidden></p>
+        <div class="actions">
+          <button id="deepButton" class="button button-primary" type="button" disabled>Run the closer scan</button>
+          <button id="startOverQuick" class="button button-ghost" type="button">Use a different video</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="deepResults" class="card" aria-labelledby="deep-title" hidden>
+      <h2 id="deep-title">Result</h2>
+      <div id="answerCard" class="answer">
+        <span id="answerPill" class="status-pill"></span>
+        <p id="locationHeadline" class="answer-headline"></p>
+        <p id="flightStatus" class="answer-reason"></p>
+        <p id="nextStep" class="answer-next" hidden></p>
+        <dl id="locationFacts" class="facts" hidden></dl>
+      </div>
+
+      <div class="table-wrap" id="flightMatchTable" hidden>
+        <h3>Flights that fit</h3>
+        <table>
+          <caption class="visually-hidden">Historical flights compared with the measured curves</caption>
+          <thead><tr><th scope="col">Flight</th><th scope="col">Aircraft</th><th scope="col">Curve</th><th scope="col">Typical error</th><th scope="col">Samples</th></tr></thead>
+          <tbody id="flightMatchRows"></tbody>
+        </table>
+      </div>
+
+      <figure class="plot">
+        <figcaption><strong>Measured curves</strong> <span id="deepSummary"></span></figcaption>
+        <div class="plot-frame" id="deepPlotFrame"><img id="deepPlot" alt="Spectrogram from the closer scan with measured curves drawn on top." hidden></div>
+      </figure>
+
+      <details class="more">
+        <summary>Curve measurements</summary>
+        <div class="table-wrap">
+          <table>
+            <caption class="visually-hidden">Measured candidate frequency tracks</caption>
+            <thead><tr><th scope="col">#</th><th scope="col">Time</th><th scope="col">Start → end</th><th scope="col">Change</th><th scope="col">Straight-line fit</th><th scope="col">Strength</th><th scope="col">Note</th></tr></thead>
+            <tbody id="candidateRows"></tbody>
+          </table>
+          <p id="noCandidates" class="help" hidden>No curve met the measurement thresholds.</p>
+        </div>
+      </details>
+      <details class="more">
+        <summary>Assumptions and limits</summary>
+        <div id="uncertaintyContent"></div>
+      </details>
+      <div class="actions">
+        <button id="exportButton" class="button button-secondary" type="button">Download report (JSON)</button>
+        <button id="startOverButton" class="button button-ghost" type="button">Start over</button>
+      </div>
+      <p class="help">Everything here is deleted within 24 hours. Download the report to keep the measurements.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Analyze recordings you have the right to use. Results are experimental, can be wrong, and shouldn't be the only basis for locating anything or anyone.</p>
+    <p>Flight history: ADSB.lol contributors · <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener noreferrer">ODbL 1.0</a></p>
+  </footer>
+</body>
+</html>
