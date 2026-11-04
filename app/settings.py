@@ -14,7 +14,10 @@ def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
-APP_ENV = os.getenv("DOPPLERTRACK_ENV", "development").lower()
+# Fail closed: login is only skipped when development mode is requested explicitly.
+APP_ENV = os.getenv("DOPPLERTRACK_ENV", "production").strip().lower()
+if APP_ENV not in {"production", "development"}:
+    raise RuntimeError("DOPPLERTRACK_ENV must be production or development")
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/tmp/dopplertrack-uploads")
 DATA_DIR = os.getenv("DATA_DIR", "/tmp/dopplertrack-data")

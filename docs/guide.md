@@ -42,6 +42,7 @@ Geometry matters as much as sound quality. Planes passing **low and off to one s
 - **Length:** long recordings catch more flyovers. Published demonstrations mostly use around an hour or more.
 - **Aircraft type:** propeller planes work best. Jets mostly help only near airports.
 - **Known time:** the start time, ideally to within seconds.
+- **Known conditions:** rough ground height and temperature improve the fit.
 - **Untouched sound:** heavy noise suppression can erase the hum.
 - **Coverage:** the plane has to be in the flight data, and many small aircraft aren't.
 

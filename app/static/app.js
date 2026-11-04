@@ -207,6 +207,8 @@ function appendLocationRequest(body) {
   body.append("search_radius_km", radius);
   body.append("time_uncertainty_seconds", document.getElementById("timeUncertainty").value);
   body.append("flight_lookup_consent", "true");
+  body.append("ground_elevation_m", document.getElementById("groundElevation").value.trim());
+  body.append("ground_temp_c", document.getElementById("groundTemp").value.trim());
   return true;
 }
 
@@ -533,10 +535,11 @@ function drawCurves(frame, candidates, duration) {
   overlay.setAttribute("viewBox", "0 0 900 298");
   overlay.setAttribute("aria-hidden", "true");
   const height = 260;
-  const span = Math.log(5000 / 100);
+  const lowest = 50;
+  const span = Math.log(5000 / lowest);
   candidates.forEach((item, index) => {
     const points = (item.measurements || [])
-      .map(([time, hertz]) => [(time / duration) * 900, height * (1 - Math.log(hertz / 100) / span)])
+      .map(([time, hertz]) => [(time / duration) * 900, height * (1 - Math.log(hertz / lowest) / span)])
       .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y) && y >= 0 && y <= height);
     if (points.length < 2) return;
     const line = document.createElementNS(ns, "polyline");

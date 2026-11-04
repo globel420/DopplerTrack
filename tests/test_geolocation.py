@@ -122,6 +122,71 @@ class DopplerGeolocationTests(unittest.TestCase):
         self.assertEqual(result["status"], "insufficient_evidence")
         self.assertIsNone(result["location"])
 
+    def test_sound_speed_follows_temperature_and_height(self):
+        cool = geolocation.sound_speed_along_path(geolocation.SiteConditions(15.0, 0.0), np.array([0.0]))[0]
+        hot = geolocation.sound_speed_along_path(geolocation.SiteConditions(35.0, 0.0), np.array([0.0]))[0]
+        high = geolocation.sound_speed_along_path(geolocation.SiteConditions(15.0, 0.0), np.array([10000.0]))[0]
+        self.assertAlmostEqual(cool, 340.3, delta=0.5)
+        self.assertGreater(hot, cool + 10)
+        self.assertLess(high, cool - 15)
+
+    def test_site_conditions_are_bounded_and_blank_means_standard(self):
+        self.assertEqual(geolocation.validate_site_conditions("", ""), geolocation.DEFAULT_SITE)
+        self.assertEqual(geolocation.validate_site_conditions("20", "1600"), geolocation.SiteConditions(20.0, 1600.0))
+        with self.assertRaises(ValueError):
+            geolocation.validate_site_conditions("61", "")
+        with self.assertRaises(ValueError):
+            geolocation.validate_site_conditions("", "nan")
+
+    def test_stated_elevation_recovers_a_high_altitude_microphone(self):
+        recording = datetime(2026, 1, 1, tzinfo=UTC)
+        epoch = recording.timestamp()
+        site = geolocation.SiteConditions(10.0, 1600.0)
+        receiver = geolocation.geodetic_to_ecef(0.0, 0.0, site.ground_elevation_m)
+        flight = _make_flight("one", "east", 3000, epoch + 20, 90)
+        for point in range(len(flight["segments"][0])):
+            stamp, lat, lon, _ = flight["segments"][0][point]
+            flight["segments"][0][point] = (stamp, lat, lon, 3000.0 / 0.3048)
+        segment = geolocation.prepare_segments([flight])[0]
+        moments = np.linspace(0.0, 40.0, 41)
+        ratios, _ = geolocation.predict_doppler_ratio(receiver, epoch + moments, segment, site)
+        curve = {"measurements": np.column_stack((moments, 200.0 * ratios)).tolist()}
+        right = geolocation.score_curve_against_segment(curve, epoch, receiver, segment, 0.0, site)
+        wrong = geolocation.score_curve_against_segment(
+            curve, epoch, geolocation.geodetic_to_ecef(0.0, 0.0, 0.0), segment, 0.0, geolocation.DEFAULT_SITE
+        )
+        self.assertLess(right["median_error_hz"], 1e-6)
+        self.assertGreater(wrong["median_error_hz"], right["median_error_hz"] + 0.05)
+
+    def test_search_never_scores_a_hypothesis_twice_and_can_be_stopped(self):
+        recording = datetime(2026, 1, 1, tzinfo=UTC)
+        epoch = recording.timestamp()
+        flights = [_make_flight("a", "east", 3000, epoch + 4, 100), _make_flight("b", "north", 3000, epoch + 4, 100)]
+        curve = _make_curve(flights[0], epoch, 0, 0.0, 300.0)
+        seen = []
+        original = geolocation._score_hypothesis
+
+        def counting(curves, segments, start, point, offset, site):
+            seen.append((point, offset))
+            return original(curves, segments, start, point, offset, site)
+
+        with patch.object(geolocation, "_score_hypothesis", counting):
+            geolocation.rank_location_hypotheses(
+                [curve], flights, recording.isoformat(), geolocation.SearchArea(0, 0, 2), 10
+            )
+        self.assertEqual(len(seen), len(set(seen)))
+
+        class Stop(Exception):
+            pass
+
+        def stop():
+            raise Stop
+
+        with self.assertRaises(Stop):
+            geolocation.rank_location_hypotheses(
+                [curve], flights, recording.isoformat(), geolocation.SearchArea(0, 0, 2), 10, checkpoint=stop
+            )
+
     def test_lookup_requires_explicit_consent_and_admin_enablement(self):
         with patch.object(geolocation, "query_historical_tracks") as query:
             result = geolocation.match_recording([], None, None, 20, 30, False, True)

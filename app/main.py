@@ -30,10 +30,10 @@ from jwt.exceptions import PyJWTError
 from app import settings
 from app.access import principal, verify_access_token
 from app.analysis import AnalysisError, report_filename, safe_report_json
-from app.geolocation import validate_search_area
+from app.geolocation import validate_search_area, validate_site_conditions
 from app.url_security import UnsafeMediaURL, validate_media_url
 
-if settings.APP_ENV == "production":
+if settings.APP_ENV != "development":
     settings.validate_production_access()
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(levelname)s %(message)s")
@@ -45,7 +45,7 @@ UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024
 
 
 def require_access(request: Request) -> str:
-    if settings.APP_ENV != "production":
+    if settings.APP_ENV == "development":
         request.state.principal = "local-development"
         return request.state.principal
     token = request.headers.get("Cf-Access-Jwt-Assertion", "")
@@ -130,6 +130,7 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "media": job.get("media"),
         "recording_datetime": job.get("recording_datetime"),
         "search_area": job.get("search_area"),
+        "site_conditions": job.get("site_conditions"),
         "time_uncertainty_seconds": job.get("time_uncertainty_seconds", 30),
         "flight_lookup_consent": bool(job.get("flight_lookup_consent")),
         "quick_result": job.get("quick_result"),
@@ -830,6 +831,8 @@ def start_deep_scan(
     search_radius_km: str = Form(default=""),
     time_uncertainty_seconds: int | None = Form(default=None),
     flight_lookup_consent: bool | None = Form(default=None),
+    ground_temp_c: str = Form(default=""),
+    ground_elevation_m: str = Form(default=""),
 ) -> dict:
     owner = request.state.principal
     _rate_limit(owner, "deep", 5, 3600)
@@ -858,6 +861,16 @@ def start_deep_scan(
         job["search_area"] = area
         job["time_uncertainty_seconds"] = uncertainty
         job["flight_lookup_consent"] = consent
+        if len(ground_temp_c) > 40 or len(ground_elevation_m) > 40:
+            raise HTTPException(status_code=400, detail="Site details are too long.")
+        try:
+            site = validate_site_conditions(ground_temp_c.strip(), ground_elevation_m.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        job["site_conditions"] = {
+            "ground_temp_c": site.ground_temp_c,
+            "ground_elevation_m": site.ground_elevation_m,
+        }
     _ensure_queue_room()
     job["phase"] = "deep"
     job["status"] = "queued"

@@ -154,6 +154,7 @@ def process_job(job_id: str) -> None:
                 started,
                 progress=progress,
                 request_permit=reserve_adsb_query,
+                site_conditions=job.get("site_conditions"),
             )
             if cancel_requested(job_id):
                 raise Cancelled

@@ -9,14 +9,14 @@ dup = 0
 orig = g._score_hypothesis
 
 
-def wrap(c, s, e, p, o):
+def wrap(c, s, e, p, o, *rest):
     global calls, dup
     calls += 1
     k = (p, o)
     if k in pts:
         dup += 1
     pts.add(k)
-    return orig(c, s, e, p, o)
+    return orig(c, s, e, p, o, *rest)
 
 
 g._score_hypothesis = wrap

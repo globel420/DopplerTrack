@@ -65,7 +65,7 @@ python -m app.worker
 Open <http://127.0.0.1:8765>.
 
 > [!CAUTION]
-> Development mode has **no login**, and it's the default when `DOPPLERTRACK_ENV` is unset. Never expose it to a network.
+> Development mode has **no login**. It only runs when you set `DOPPLERTRACK_ENV=development`, so never use that setting on a machine others can reach. Without it, the app requires Cloudflare Access and won't start until that's configured.
 
 ## Run the tests
 

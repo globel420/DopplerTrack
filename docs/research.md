@@ -14,10 +14,10 @@ An older line of academic work established the physics: [estimating a propeller 
 | --- | --- | --- | --- | --- | --- | --- |
 | **Analysis audio rate** | up to 22.05 kHz | 4 kHz | not checked | not checked | 4 kHz | 4 kHz |
 | **Spectrum window** | 0.19 s | 2 s | not checked | not checked | 1 s | about 1 s |
-| **Lowest frequency** | 150 Hz | 40 Hz | not checked | 40 Hz | 60 Hz (script option) | 80 Hz |
-| **Curve tracing** | Greedy peak linking | Bounded peak linking, plus Viterbi in its replay method | Peak linking, constant-ratio harmonic groups | Detector with whitening | Viterbi with an "off" state | Dynamic programming |
-| **Sound speed** | Fixed 343 m/s | Constant, tested as a sensitivity | From temperature, refined ±5 °C | not checked | From temperature data | 340 m/s in its 1D model |
-| **Ground height** | Sea level | Terrain data plus geoid | Flat setting or USGS terrain | not checked | Fitted scale | not stated |
+| **Lowest frequency** | 50 Hz | 40 Hz | not checked | 40 Hz | 60 Hz (script option) | 80 Hz |
+| **Curve tracing** | Greedy peak linking with a continuity check | Bounded peak linking, plus Viterbi in its replay method | Peak linking, constant-ratio harmonic groups | Detector with whitening | Viterbi with an "off" state | Dynamic programming |
+| **Sound speed** | From stated temperature, standard lapse | Constant, tested as a sensitivity | From temperature, refined ±5 °C | not checked | From temperature data | 340 m/s in its 1D model |
+| **Ground height** | Stated by the user, sea level if blank | Terrain data plus geoid | Flat setting or USGS terrain | not checked | Fitted scale | not stated |
 | **Search grid** | About 35 points | 200 m | Dense grid, then least squares | 200 m, then 50 m | 1000, 200, then 50 m | Grid, then Nelder-Mead |
 | **Needs known area** | Yes, up to 50 km radius | US, DE or ES profile, or bounds | Yes | Search box | Yes, up to 60 km | No |
 | **Needs known time** | Yes, within 10 min | Yes | Clock prior | Day | Date and tolerance | No |

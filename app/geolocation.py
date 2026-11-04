@@ -16,6 +16,9 @@ ADSB_AERO_QUERY_URL = "https://adsb.aero/api/v1/query"
 ADSB_AERO_LIMIT = 50
 MAX_PROVIDER_RESPONSE_BYTES = 8 * 1024 * 1024
 SOUND_SPEED_MPS = 343.0
+SLOWEST_SOUND_SPEED_MPS = 295.0
+LAPSE_RATE_K_PER_M = 0.0065
+TROPOPAUSE_K = 216.65
 MAX_SOUND_RANGE_KM = 60.0
 MIN_CURVE_SPAN_SECONDS = 3.0
 MIN_CURVE_SAMPLES = 12
@@ -47,6 +50,17 @@ class SearchArea:
     radius_km: float
 
 
+@dataclass(frozen=True)
+class SiteConditions:
+    """What the matcher assumes about the air and ground at the microphone."""
+
+    ground_temp_c: float = 15.0
+    ground_elevation_m: float = 0.0
+
+
+DEFAULT_SITE = SiteConditions()
+
+
 def _finite_number(value: Any) -> float | None:
     try:
         result = float(value)
@@ -66,6 +80,29 @@ def validate_search_area(center_lat: Any, center_lon: Any, radius_km: Any) -> Se
     if radius is None or not 0.5 <= radius <= 50:
         raise ValueError("Search radius must be between 0.5 and 50 km.")
     return SearchArea(lat, lon, radius)
+
+
+def validate_site_conditions(ground_temp_c: Any = None, ground_elevation_m: Any = None) -> SiteConditions:
+    """Blank values fall back to a standard 15 C day at sea level."""
+    temperature = DEFAULT_SITE.ground_temp_c
+    elevation = DEFAULT_SITE.ground_elevation_m
+    if ground_temp_c not in (None, ""):
+        temperature = _finite_number(ground_temp_c)
+        if temperature is None or not -60 <= temperature <= 60:
+            raise ValueError("Air temperature must be between -60 and 60 degrees C.")
+    if ground_elevation_m not in (None, ""):
+        elevation = _finite_number(ground_elevation_m)
+        if elevation is None or not -500 <= elevation <= 6000:
+            raise ValueError("Ground height must be between -500 and 6000 metres.")
+    return SiteConditions(temperature, elevation)
+
+
+def sound_speed_along_path(site: SiteConditions, altitude_m: np.ndarray) -> np.ndarray:
+    """Average sound speed between the ground and the aircraft, for a standard temperature lapse."""
+    ground_k = site.ground_temp_c + 273.15
+    height_m = np.maximum(np.asarray(altitude_m, dtype=float) - site.ground_elevation_m, 0.0)
+    aircraft_k = np.maximum(ground_k - LAPSE_RATE_K_PER_M * height_m, min(TROPOPAUSE_K, ground_k))
+    return 20.05 * (math.sqrt(ground_k) + np.sqrt(aircraft_k)) / 2
 
 
 def _iso_utc(value: datetime) -> str:
@@ -278,6 +315,7 @@ def prepare_segments(flights: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "icao_type": flight.get("icao_type", ""),
                 "emitter_category": flight.get("emitter_category", ""),
                 "times": stamps,
+                "altitudes_m": np.asarray([item[3] * 0.3048 for item in segment], dtype=float),
                 "positions": positions,
                 "velocities": velocities,
             })
@@ -288,10 +326,12 @@ def predict_doppler_ratio(
     receiver: np.ndarray,
     arrival_times: np.ndarray,
     segment: dict[str, Any],
+    site: SiteConditions = DEFAULT_SITE,
 ) -> tuple[np.ndarray, np.ndarray]:
     times = segment["times"]
     positions = segment["positions"]
     velocities = segment["velocities"]
+    altitudes = segment["altitudes_m"]
     emission_times = np.asarray(arrival_times, dtype=float).copy()
     aircraft = np.empty((len(emission_times), 3), dtype=float)
     speed = np.empty_like(aircraft)
@@ -299,16 +339,18 @@ def predict_doppler_ratio(
         for axis in range(3):
             aircraft[:, axis] = np.interp(emission_times, times, positions[:, axis])
         distance = np.linalg.norm(aircraft - receiver, axis=1)
-        emission_times = arrival_times - distance / SOUND_SPEED_MPS
+        sound_speed = sound_speed_along_path(site, np.interp(emission_times, times, altitudes))
+        emission_times = arrival_times - distance / sound_speed
     valid = (emission_times >= times[0]) & (emission_times <= times[-1])
     for axis in range(3):
         aircraft[:, axis] = np.interp(emission_times, times, positions[:, axis])
         speed[:, axis] = np.interp(emission_times, times, velocities[:, axis])
+    sound_speed = sound_speed_along_path(site, np.interp(emission_times, times, altitudes))
     relative = aircraft - receiver
     distance = np.linalg.norm(relative, axis=1)
     radial_velocity = np.sum(speed * relative, axis=1) / np.maximum(distance, 1.0)
     valid &= np.isfinite(radial_velocity) & (np.abs(radial_velocity) < 450)
-    ratio = SOUND_SPEED_MPS / (SOUND_SPEED_MPS + radial_velocity)
+    ratio = sound_speed / (sound_speed + radial_velocity)
     valid &= np.isfinite(ratio) & (ratio > 0.2) & (ratio < 2.0)
     return ratio, valid
 
@@ -319,6 +361,7 @@ def score_curve_against_segment(
     receiver: np.ndarray,
     segment: dict[str, Any],
     clock_offset_seconds: float,
+    site: SiteConditions = DEFAULT_SITE,
 ) -> dict[str, float] | None:
     measurements = curve.get("measurements")
     if not isinstance(measurements, list) or len(measurements) < MIN_CURVE_SAMPLES:
@@ -332,7 +375,7 @@ def score_curve_against_segment(
     if observed_times[-1] - observed_times[0] < MIN_CURVE_SPAN_SECONDS or np.any(observed_hz <= 0):
         return None
     arrivals = recording_start_epoch + clock_offset_seconds + observed_times
-    ratio, valid = predict_doppler_ratio(receiver, arrivals, segment)
+    ratio, valid = predict_doppler_ratio(receiver, arrivals, segment, site)
     if np.count_nonzero(valid) < MIN_CURVE_SAMPLES:
         return None
     times = observed_times[valid]
@@ -393,8 +436,9 @@ def _score_hypothesis(
     start_epoch: float,
     point: tuple[float, float],
     offset: float,
+    site: SiteConditions = DEFAULT_SITE,
 ) -> dict[str, Any]:
-    receiver = geodetic_to_ecef(point[0], point[1], 0.0)
+    receiver = geodetic_to_ecef(point[0], point[1], site.ground_elevation_m)
     flights_by_id: dict[str, list[int]] = {}
     for segment_i, segment in enumerate(segments):
         flights_by_id.setdefault(segment["flight_id"], []).append(segment_i)
@@ -405,7 +449,7 @@ def _score_hypothesis(
         for flight_i, flight_id in enumerate(flight_ids):
             best_fit: tuple[int, dict[str, float]] | None = None
             for segment_i in flights_by_id[flight_id]:
-                fit = score_curve_against_segment(curve, start_epoch, receiver, segments[segment_i], offset)
+                fit = score_curve_against_segment(curve, start_epoch, receiver, segments[segment_i], offset, site)
                 if fit and (best_fit is None or fit["median_relative_error"] < best_fit[1]["median_relative_error"]):
                     best_fit = (segment_i, fit)
             if best_fit:
@@ -443,6 +487,8 @@ def rank_location_hypotheses(
     recording_datetime: str,
     area: SearchArea,
     time_uncertainty_seconds: int,
+    site: SiteConditions = DEFAULT_SITE,
+    checkpoint: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     try:
         recording_start = datetime.fromisoformat(recording_datetime)
@@ -470,7 +516,7 @@ def rank_location_hypotheses(
     start_epoch = recording_start.astimezone(UTC).timestamp()
     curve_start = min(float(curve["measurements"][0][0]) for curve in usable_curves)
     curve_end = max(float(curve["measurements"][-1][0]) for curve in usable_curves)
-    emission_start = start_epoch + curve_start - int(time_uncertainty_seconds) - MAX_SOUND_RANGE_KM * 1000 / SOUND_SPEED_MPS
+    emission_start = start_epoch + curve_start - int(time_uncertainty_seconds) - MAX_SOUND_RANGE_KM * 1000 / SLOWEST_SOUND_SPEED_MPS
     emission_end = start_epoch + curve_end + int(time_uncertainty_seconds)
     prepared = [
         segment for segment in prepare_segments(flights)
@@ -489,9 +535,13 @@ def rank_location_hypotheses(
 
     for refinement in range(3):
         for point in points:
-            existing = best_by_point.get(point)
+            if point in best_by_point:
+                continue
+            if checkpoint:
+                checkpoint()
+            existing = None
             for offset in _offsets(time_uncertainty_seconds):
-                hypothesis = _score_hypothesis(usable_curves, prepared, start_epoch, point, offset)
+                hypothesis = _score_hypothesis(usable_curves, prepared, start_epoch, point, offset, site)
                 if existing is None or hypothesis["score"] < existing["score"]:
                     existing = hypothesis
             if existing:
@@ -559,9 +609,13 @@ def rank_location_hypotheses(
         "best_median_relative_error": round(float(best["score"][1]), 6) if matches else None,
         "data_truncated": False,
         "attribution": ATTRIBUTION,
+        "site_conditions": {
+            "ground_temp_c": site.ground_temp_c,
+            "ground_elevation_m": site.ground_elevation_m,
+        },
         "limitations": [
             "Location scores are fit residuals, not probabilities or calibrated confidence intervals.",
-            "The search uses pressure-altitude ADS-B positions, sea-level receiver elevation, and a fixed sound speed; terrain, wind, clock drift, reflections, aircraft maneuvering, and source-tone changes are not fully modeled.",
+            "The search uses pressure-altitude ADS-B positions, one ground height, and a standard temperature profile from the stated ground temperature; terrain, wind, clock drift, reflections, aircraft maneuvering, and source-tone changes are not fully modeled.",
             "A result is an experimental candidate only; independent known-location validation is still required.",
             "A missing ADS-B track does not show that no aircraft was present.",
         ],
@@ -577,6 +631,8 @@ def match_recording(
     consent: bool,
     enabled: bool,
     request_permit: Callable[[], bool] | None = None,
+    site: dict[str, Any] | None = None,
+    checkpoint: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     base = {"provider": ATTRIBUTION["provider"], "attribution": ATTRIBUTION}
     if not consent:
@@ -629,6 +685,9 @@ def match_recording(
         area = validate_search_area(
             area_values.get("center_lat"), area_values.get("center_lon"), area_values.get("radius_km")
         )
+        conditions = validate_site_conditions(
+            (site or {}).get("ground_temp_c"), (site or {}).get("ground_elevation_m")
+        )
         if request_permit and not request_permit():
             return {
                 **base,
@@ -667,6 +726,6 @@ def match_recording(
             "data_truncated": False,
         }
     result = rank_location_hypotheses(
-        curves, flights, recording_datetime, area, time_uncertainty_seconds
+        curves, flights, recording_datetime, area, time_uncertainty_seconds, conditions, checkpoint
     )
     return {**base, **result, "flight_track_count": len(flights)}

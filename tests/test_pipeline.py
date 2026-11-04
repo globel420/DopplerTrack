@@ -23,6 +23,8 @@ import jwt
 import numpy as np
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+os.environ.setdefault("DOPPLERTRACK_ENV", "development")
+
 from app import access, analysis, egress_proxy, main, settings, worker
 from app.url_import import download_page_video
 from app.url_security import UnsafeMediaURL, resolve_public_host, validate_media_url
@@ -636,6 +638,49 @@ class DopplerTrackPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(accepted.status_code, 200, accepted.text)
         self.assertFalse(self.read_job(job_id)["flight_lookup_consent"])
         self.assertIsNone(self.read_job(job_id)["search_area"])
+
+    async def test_deep_scan_stores_site_conditions_and_rejects_bad_ones(self):
+        job_id = (await self.upload(self.chirp)).json()["id"]
+        worker.process_job(job_id)
+        details = {
+            "flight_lookup_consent": "true",
+            "recording_datetime": "2026-06-01T12:00:00-07:00",
+            "center_lat": "38.5",
+            "center_lon": "-121.5",
+            "search_radius_km": "10",
+        }
+        too_hot = await self.request("POST", f"/api/jobs/{job_id}/deep", data={**details, "ground_temp_c": "99"})
+        self.assertEqual(too_hot.status_code, 400)
+        too_high = await self.request("POST", f"/api/jobs/{job_id}/deep", data={**details, "ground_elevation_m": "9000"})
+        self.assertEqual(too_high.status_code, 400)
+        accepted = await self.request(
+            "POST", f"/api/jobs/{job_id}/deep", data={**details, "ground_temp_c": "28", "ground_elevation_m": "1600"}
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        self.assertEqual(accepted.json()["site_conditions"], {"ground_temp_c": 28.0, "ground_elevation_m": 1600.0})
+        worker.process_job(job_id)
+        self.assertEqual(self.read_job(job_id)["status"], "completed")
+
+    def test_login_is_required_unless_development_is_explicit(self):
+        script = "from app import settings; print(settings.APP_ENV)"
+        env = {key: value for key, value in os.environ.items() if key != "DOPPLERTRACK_ENV"}
+
+        def run(code, extra=None):
+            return subprocess.run(
+                [sys.executable, "-c", code],
+                check=False,
+                cwd=Path(__file__).parents[1],
+                env={**env, **(extra or {})},
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+        self.assertEqual(run(script).stdout.strip().splitlines()[-1], "production")
+        self.assertNotEqual(run(script, {"DOPPLERTRACK_ENV": "prod"}).returncode, 0)
+        unconfigured = run("import app.main", {"CF_ACCESS_TEAM_DOMAIN": "", "CF_ACCESS_AUD": ""})
+        self.assertNotEqual(unconfigured.returncode, 0)
+        self.assertIn("CF_ACCESS_TEAM_DOMAIN", unconfigured.stderr)
 
     async def test_ui_routes_and_security_headers(self):
         home = await self.request("GET", "/")

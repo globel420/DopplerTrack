@@ -17,6 +17,8 @@ from scipy.signal import find_peaks, stft
 from app import settings
 from app.geolocation import match_recording
 
+MIN_TRACK_SUPPORT = 0.55
+
 
 class Cancelled(Exception):
     pass
@@ -226,7 +228,7 @@ def _preview_parts(
     times: np.ndarray,
     db: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    mask = (frequencies >= 100) & (frequencies <= 5000)
+    mask = (frequencies >= PLOT_MIN_HZ) & (frequencies <= PLOT_MAX_HZ)
     selected_frequencies = frequencies[mask]
     rows = db[mask]
     if rows.size == 0:
@@ -257,20 +259,55 @@ def _robust_line(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return float(coefficients[0]), float(coefficients[1])
 
 
+def _refined_peak_hz(frame: np.ndarray, peak: int, frequencies: np.ndarray, bin_hz: float) -> float:
+    """Estimate a peak's frequency between FFT bins with a parabola through its neighbours."""
+    left, center, right = float(frame[peak - 1]), float(frame[peak]), float(frame[peak + 1])
+    curvature = left - 2 * center + right
+    if curvature >= 0:
+        return float(frequencies[peak])
+    offset = 0.5 * (left - right) / curvature
+    return float(frequencies[peak]) + max(-0.5, min(0.5, offset)) * bin_hz
+
+
 def _ridge_candidates(
     frequencies: np.ndarray,
     times: np.ndarray,
     db: np.ndarray,
-    min_frequency: float = 150.0,
+    min_frequency: float = 50.0,
     max_frequency: float = 5000.0,
     prominence_db: float = 7.0,
     max_tracks: int = 48,
     include_measurements: bool = False,
 ) -> list[dict]:
+    """Link spectral peaks into candidate curves.
+
+    ``max_tracks`` limits tracks in progress, not tracks over the whole clip, so
+    noise early in a recording cannot use up the budget before an aircraft is heard.
+    """
     allowed = np.flatnonzero((frequencies >= min_frequency) & (frequencies <= max_frequency))
-    tracks: list[dict] = []
+    allowed_frequencies = frequencies[allowed]
+    bin_hz = float(frequencies[1] - frequencies[0]) if len(frequencies) > 1 else 1.0
+    active: list[dict] = []
+    finished: list[dict] = []
     hop_dt = float(np.median(np.diff(times))) if len(times) > 1 else 0.1
+    max_gap_seconds = max(0.6, 4 * hop_dt)
+
+    def retire(track: dict) -> None:
+        if len(track["times"]) >= 12:
+            finished.append(track)
+
     for frame_index, timestamp in enumerate(times):
+        still_active = []
+        for track in active:
+            if timestamp - track["times"][-1] <= max_gap_seconds:
+                still_active.append(track)
+            else:
+                retire(track)
+        active = still_active
+        if len(finished) > 1024:
+            finished.sort(key=lambda track: len(track["times"]), reverse=True)
+            del finished[512:]
+
         frame = db[allowed, frame_index]
         if frame.size < 3:
             continue
@@ -280,33 +317,37 @@ def _ridge_candidates(
         order = np.argsort(properties["prominences"])[::-1][:10]
         peaks = peaks[order]
         prominences = properties["prominences"][order]
-        current = [(float(frequencies[allowed[index]]), float(prom)) for index, prom in zip(peaks, prominences)]
-        active = [
-            track for track in tracks
-            if timestamp - track["times"][-1] <= max(0.6, 4 * hop_dt)
-        ]
-        for frequency, prominence in current:
+        candidates_before_frame = list(active)
+        for peak, prominence in zip(peaks, prominences):
+            frequency = _refined_peak_hz(frame, int(peak), allowed_frequencies, bin_hz)
             choices = [
                 (abs(frequency - track["frequencies"][-1]), track)
-                for track in active
-                if abs(frequency - track["frequencies"][-1]) <= max(25.0, track["frequencies"][-1] * 0.025)
-                and track["times"][-1] < timestamp
+                for track in candidates_before_frame
+                if abs(frequency - track["frequencies"][-1]) <= max(2 * bin_hz, track["frequencies"][-1] * 0.025)
+                and track["last_frame"] != frame_index
             ]
             if choices:
                 _, track = min(choices, key=lambda item: item[0])
-                if track.get("last_frame") == frame_index:
-                    continue
                 track["times"].append(float(timestamp))
                 track["frequencies"].append(frequency)
-                track["prominences"].append(prominence)
+                track["prominences"].append(float(prominence))
                 track["last_frame"] = frame_index
-            elif len(tracks) < max_tracks:
-                tracks.append({
+            else:
+                if len(active) >= max_tracks:
+                    shortest = min(active, key=lambda track: len(track["times"]))
+                    active.remove(shortest)
+                    if shortest in candidates_before_frame:
+                        candidates_before_frame.remove(shortest)
+                    retire(shortest)
+                active.append({
                     "times": [float(timestamp)],
                     "frequencies": [frequency],
-                    "prominences": [prominence],
+                    "prominences": [float(prominence)],
                     "last_frame": frame_index,
                 })
+    for track in active:
+        retire(track)
+    tracks = finished
 
     output: list[dict] = []
     for track in tracks:
@@ -316,6 +357,11 @@ def _ridge_candidates(
         y = np.asarray(track["frequencies"], dtype=float)
         duration = float(x[-1] - x[0])
         if duration < 1.0:
+            continue
+        # A real tone stays visible most of the time; noise peaks that happen to
+        # line up leave many gaps (under 50% in tests, against 93%+ for true curves).
+        support = len(x) / (duration / hop_dt + 1)
+        if support < MIN_TRACK_SUPPORT:
             continue
         slope, intercept = _robust_line(x, y)
         fitted = slope * x + intercept
@@ -332,6 +378,7 @@ def _ridge_candidates(
             "fit_r_squared": round(float(r_squared), 3),
             "median_prominence_db": round(float(np.median(track["prominences"])), 1),
             "observations": len(x),
+            "track_support": round(float(support), 2),
         }
         if include_measurements:
             indices = np.linspace(0, len(x) - 1, min(96, len(x)), dtype=int)
@@ -348,6 +395,9 @@ def _png_chunk(kind: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", crc)
 
 
+PLOT_MIN_HZ = 50.0
+PLOT_MAX_HZ = 5000.0
+
 # Sampled from a perceptually ordered dark-to-bright ramp. Display only.
 _PLOT_RAMP = np.array([
     (0, 0, 4), (40, 11, 84), (101, 21, 110), (159, 42, 99),
@@ -357,13 +407,13 @@ _PLOT_RAMP = np.array([
 
 def _spectrogram_svg(frequencies: np.ndarray, times: np.ndarray, db: np.ndarray) -> str:
     """Render a log-frequency plot; aircraft tones sit low, where a linear axis hides them."""
-    frequency_mask = (frequencies >= 100) & (frequencies <= 5000)
+    frequency_mask = (frequencies >= PLOT_MIN_HZ) & (frequencies <= PLOT_MAX_HZ)
     rows = db[frequency_mask]
     if rows.size == 0:
         return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 200\"></svg>"
     max_width, max_height = 900, 260
     selected = frequencies[frequency_mask]
-    targets = np.geomspace(100.0, 5000.0, max_height)
+    targets = np.geomspace(PLOT_MIN_HZ, PLOT_MAX_HZ, max_height)
     row_indices = np.clip(np.searchsorted(selected, targets), 0, len(selected) - 1)
     col_step = max(1, math.ceil(rows.shape[1] / max_width))
     reduced = rows[row_indices][:, ::col_step]
@@ -388,19 +438,19 @@ def _spectrogram_svg(frequencies: np.ndarray, times: np.ndarray, db: np.ndarray)
     if not math.isfinite(duration):
         duration = 0.0
     total_height = max_height + 38
-    span = math.log(5000.0 / 100.0)
+    span = math.log(PLOT_MAX_HZ / PLOT_MIN_HZ)
     ticks = "".join(
         f'<line x1="0" x2="{max_width}" y1="{y:.1f}" y2="{y:.1f}" stroke="#ffffff" stroke-opacity=".16"/>'
         f'<text x="8" y="{max(y - 5, 13):.1f}" fill="#ffffff" font-size="12" paint-order="stroke" '
         f'stroke="#000000" stroke-width="3">{label}</text>'
         for label, y in (
-            (name, max_height * (1 - math.log(hz / 100.0) / span))
-            for name, hz in (("200 Hz", 200), ("500 Hz", 500), ("1 kHz", 1000), ("2 kHz", 2000), ("5 kHz", 5000))
+            (name, max_height * (1 - math.log(hz / PLOT_MIN_HZ) / span))
+            for name, hz in (("100 Hz", 100), ("200 Hz", 200), ("500 Hz", 500), ("1 kHz", 1000), ("2 kHz", 2000), ("5 kHz", 5000))
         )
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {max_width} {total_height}" font-family="sans-serif" role="img" '
-        f'aria-label="Audio spectrogram, 100 to 5000 hertz over {duration:.1f} seconds">'
+        f'aria-label="Audio spectrogram, 50 to 5000 hertz over {duration:.1f} seconds">'
         '<rect width="100%" height="100%" fill="#0b0e14"/>'
         f'<image x="0" y="0" width="{max_width}" height="{max_height}" preserveAspectRatio="none" '
         f'href="data:image/png;base64,{png_data}"/>'
@@ -450,8 +500,35 @@ def _independent_curve_candidates(candidates: list[dict]) -> list[dict]:
     return selected
 
 
+# Ratios between two tones from one engine, including a missing fundamental (3:2 is 3f and 2f).
+_HARMONIC_RATIOS = (
+    (4 / 3, "4:3"), (3 / 2, "3:2"), (5 / 3, "5:3"), (2.0, "2:1"), (5 / 2, "5:2"), (3.0, "3:1"), (4.0, "4:1"),
+)
+
+
+def _overlap_ratios(first: dict, second: dict, start: float, end: float) -> np.ndarray:
+    """Return the higher tone divided by the lower one at points across their overlap."""
+    moments = np.linspace(start, end, 9)
+
+    def curve(track: dict) -> np.ndarray:
+        measurements = track.get("measurements")
+        if measurements and len(measurements) >= 2:
+            values = np.asarray(measurements, dtype=float)
+            return np.interp(moments, values[:, 0], values[:, 1])
+        return track["start_hz"] + track["slope_hz_per_second"] * (moments - track["start_seconds"])
+
+    one, two = curve(first), curve(second)
+    if np.any(one <= 0) or np.any(two <= 0):
+        return np.array([])
+    return np.maximum(one, two) / np.minimum(one, two)
+
+
 def _annotate_harmonic_candidates(candidates: list[dict]) -> list[dict]:
-    """Mark possible harmonics and return one representative per tonal family."""
+    """Mark possible harmonics and return one representative per tonal family.
+
+    Two tones from one source keep a constant ratio even as both slide. A false
+    grouping only makes the matcher more likely to abstain, so this errs toward grouping.
+    """
     for item in candidates:
         item["harmonic_relation"] = "no consistent harmonic partner detected"
     for i, first in enumerate(candidates):
@@ -461,22 +538,15 @@ def _annotate_harmonic_candidates(candidates: list[dict]) -> list[dict]:
             overlap_end = min(first["end_seconds"], second["end_seconds"])
             if overlap_end - overlap_start < 1.0:
                 continue
-
-            def fitted(track: dict, at: float) -> float:
-                return track["start_hz"] + track["slope_hz_per_second"] * (at - track["start_seconds"])
-
-            ratios = []
-            for at in (overlap_start, overlap_end):
-                f1 = fitted(first, at)
-                f2 = fitted(second, at)
-                ratios.append(max(f1, f2) / max(min(f1, f2), 1e-6))
-            harmonic_numbers = [round(ratio) for ratio in ratios]
-            if (
-                harmonic_numbers[0] in {2, 3, 4}
-                and harmonic_numbers[0] == harmonic_numbers[1]
-                and all(abs(ratio - harmonic_numbers[0]) <= 0.06 for ratio in ratios)
-            ):
-                note = f"possible {harmonic_numbers[0]}:1 ratio across overlap"
+            ratios = _overlap_ratios(first, second, overlap_start, overlap_end)
+            if not ratios.size:
+                continue
+            typical = float(np.median(ratios))
+            if (float(ratios.max()) - float(ratios.min())) / typical > 0.03:
+                continue
+            target, label = min(_HARMONIC_RATIOS, key=lambda option: abs(typical - option[0]))
+            if abs(typical - target) / target <= 0.015:
+                note = f"possible {label} ratio across overlap"
                 first["harmonic_relation"] = note
                 second["harmonic_relation"] = note
                 first.setdefault("harmonic_partner_indexes", []).append(j)
@@ -687,6 +757,7 @@ def _run_deep_windowed(
     started: float,
     progress: Callable[[int], None] | None,
     request_permit: Callable[[], bool] | None,
+    site_conditions: dict | None = None,
 ) -> dict:
     native_rate = int(metadata.get("sample_rate") or 22050)
     sample_rate = min(max(native_rate, 8000), 22050)
@@ -745,6 +816,8 @@ def _run_deep_windowed(
         flight_lookup_consent,
         settings.ADSB_HISTORY_ENABLED,
         request_permit,
+        site=site_conditions,
+        checkpoint=lambda: _check(cancelled, started),
     )
     _check(cancelled, started)
     if progress:
@@ -774,7 +847,7 @@ def _run_deep_windowed(
         "assumptions": [
             "The uploaded file's audio stream is representative of the recording.",
             "Recording time, clock uncertainty, and search area are user-supplied. Upload time and upload location are never substituted.",
-            "The one-hour recording was analyzed in consecutive 60-second windows at up to 22.05 kHz mono; measurements retain offsets from the clip start.",
+            "This long recording was analyzed in consecutive 60-second windows at up to 22.05 kHz mono; measurements retain offsets from the clip start.",
         ],
         "uncertainty": [
             "Spectral ridges can be produced by sirens, traffic, machinery, wind, voices, and codec artifacts.",
@@ -798,13 +871,14 @@ def run_deep(
     started: float,
     progress: Callable[[int], None] | None = None,
     request_permit: Callable[[], bool] | None = None,
+    site_conditions: dict | None = None,
 ) -> dict:
     _check(cancelled, started)
     if float(metadata.get("duration_seconds") or 0) > 600:
         return _run_deep_windowed(
             path, metadata, report_dir, recording_datetime, search_area,
             time_uncertainty_seconds, flight_lookup_consent, cancelled,
-            started, progress, request_permit,
+            started, progress, request_permit, site_conditions,
         )
     native_rate = int(metadata.get("sample_rate") or 22050)
     sample_rate = min(max(native_rate, 8000), 22050)
@@ -844,6 +918,8 @@ def run_deep(
         flight_lookup_consent,
         settings.ADSB_HISTORY_ENABLED,
         request_permit,
+        site=site_conditions,
+        checkpoint=lambda: _check(cancelled, started),
     )
     _check(cancelled, started)
     if progress:
@@ -872,7 +948,7 @@ def run_deep(
         "assumptions": [
             "The uploaded file's audio stream is representative of the recording.",
             "Recording time, clock uncertainty, and search area are user-supplied. Upload time and upload location are never substituted.",
-            "Frequency tracks use mono audio at the source sample rate up to 48 kHz; higher-rate audio is resampled. The optional location stage applies a simplified sound-travel-time and aircraft-trajectory model.",
+            "Frequency tracks use mono audio at up to 22.05 kHz; higher-rate audio is resampled. The optional location stage applies a simplified sound-travel-time and aircraft-trajectory model.",
         ],
         "uncertainty": [
             "Spectral ridges can be produced by sirens, traffic, machinery, wind, voices, and codec artifacts.",

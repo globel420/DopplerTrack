@@ -110,6 +110,7 @@ input::placeholder { color: var(--muted); opacity: .75; }
 .url-row input { flex: 1; min-width: 0; }
 .url-row .button { flex: none; }
 .field-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
+.field-note { grid-column: 1 / -1; margin-top: -.5rem; }
 .inline-inputs { display: grid; grid-template-columns: minmax(0, 1fr) 9rem; gap: .5rem; }
 .location-fields { margin: 1rem 0 0; padding: 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .check-row { display: flex; align-items: flex-start; gap: .55rem; margin-top: 1rem; font-size: .9rem; }

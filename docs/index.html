@@ -120,6 +120,7 @@ f(t) = f₀ × c / (c + u(τ))       heard pitch; u is the speed moving away fro
           <li><strong>Length:</strong> long recordings catch more flyovers. Published demonstrations mostly use around an hour or more.</li>
           <li><strong>Aircraft type:</strong> propeller planes work best. Jets mostly help only near airports.</li>
           <li><strong>Known time:</strong> the start time, ideally to within seconds.</li>
+          <li><strong>Known conditions:</strong> rough ground height and temperature improve the fit.</li>
           <li><strong>Untouched sound:</strong> heavy noise suppression can erase the hum.</li>
           <li><strong>Coverage:</strong> the plane has to be in the flight data, and many small aircraft aren't.</li>
         </ul>
@@ -170,7 +171,8 @@ python examples/minimal_doppler_match.py</code></pre>
 cd DopplerTrack
 python -m venv .venv &amp;&amp; . .venv/bin/activate
 pip install --require-hashes -r requirements.lock
-uvicorn app.main:app --port 8765     # and in a second terminal:
+export REDIS_URL=redis://127.0.0.1:6379/0 DOPPLERTRACK_ENV=development
+uvicorn app.main:app --port 8765     # and in a second terminal, with the same exports:
 python -m app.worker</code></pre>
 
         <h3>Route 3: put it on your own site</h3>

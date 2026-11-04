@@ -12,7 +12,7 @@
 | Quick audio check and closer curve measurement | Working on generated audio; see the [known weaknesses](optimizations.md) |
 | Flight lookup through ADSB.aero, with consent | Query and parsing work against the live service; busy areas return an incomplete list, so the app abstains |
 | Location search and abstain rules | Works on clean simulated flyovers in small search areas, and fails at larger ones; see the [test results](optimizations.md) |
-| Login through Cloudflare Access, with origin token checks | Working |
+| Login through Cloudflare Access, with origin token checks | Working; required unless development mode is set explicitly |
 | Automatic deletion after 24 hours | Working |
 | Docker deployment with reduced privileges | Working |
 

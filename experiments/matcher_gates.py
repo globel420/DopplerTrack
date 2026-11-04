@@ -210,7 +210,6 @@ def run(label, N=6, **kw):
 run("ideal, r=10km", R_km=10)
 run("ideal, r=25km", R_km=25)
 run("ideal, r=50km", R_km=50)
-run("true c=320 m/s (cold air path), r=10km", R_km=10, c=320.0)
 run("receiver at 1600 m elevation, r=10km", R_km=10, recv_alt=1600.0)
 run("recorder clock off by 7 s, r=10km", R_km=10, offs=7.0)
 run("5.38 Hz bin quantisation, r=10km", R_km=10, quant=5.38)

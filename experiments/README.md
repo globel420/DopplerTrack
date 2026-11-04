@@ -15,3 +15,6 @@ PYTHONPATH=. python experiments/track_budget.py
 | `matcher_gates.py` | Does the residual gate reject unrelated tones? Includes poor-geometry cases | 10 min |
 | `matcher_flyovers.py` | How well does the search do on clean flyovers as conditions change? | 12 min |
 | `matcher_cost.py` | How much search work repeats, and how long does it take? | 3 min |
+| `detector_before_after.py` | Late tones, low tones, precision and false curves, for before-and-after runs | 3 min |
+| `track_support.py` | Does tracking continuity separate true curves from noise? | 3 min |
+| `site_conditions.py` | Does stating temperature and ground height help? Set `COND`, for example `hot_high/told` | 6 min |

@@ -144,6 +144,15 @@
               <label class="field-label" for="searchRadius">Search radius (km)</label>
               <input id="searchRadius" type="number" min="0.5" max="50" step="0.5" value="10">
             </div>
+            <div class="field wide">
+              <label class="field-label" for="groundElevation">Ground height (metres above sea level)</label>
+              <input id="groundElevation" type="number" min="-500" max="6000" step="1" placeholder="0" aria-describedby="siteHelp">
+            </div>
+            <div class="field">
+              <label class="field-label" for="groundTemp">Air temperature (°C)</label>
+              <input id="groundTemp" type="number" min="-60" max="60" step="1" placeholder="15" aria-describedby="siteHelp">
+            </div>
+            <p class="help field-note" id="siteHelp">Optional, but both affect the result. Use your best estimate for that place and time. Blank means sea level and 15 °C.</p>
           </div>
           <label class="check-row">
             <input id="flightLookupConsent" type="checkbox">
