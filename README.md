@@ -7,7 +7,7 @@ Propeller planes leave a faint hum in a video's soundtrack, and that hum falls i
 > [!WARNING]
 > **This is experimental, and its accuracy is unproven.** It has passed synthetic tests only. It has never located a real recording with a known answer, and [our own tests](docs/optimizations.md) found serious weaknesses. Treat any coordinate as an untested lead.
 
-**[Read the plain-language guide](docs/guide.md)**, which explains how it works and how to build your own.
+**[Open the interactive guide](https://globel420.github.io/DopplerTrack/docs/)** to see how it works and how to build your own, or read the [text version](docs/guide.md).
 
 ## Try the idea in one minute
 
@@ -95,7 +95,7 @@ Uploads, plots and job records are deleted after 24 hours.
 
 ## Documentation
 
-- [Plain-language guide](docs/guide.md): what this is, how it works, and how to build your own
+- [Interactive guide](https://globel420.github.io/DopplerTrack/docs/) and [text version](docs/guide.md): what this is, how it works, and how to build your own
 - [Project scope](docs/scope.md): what's built, what isn't, and what's unverified
 - [Optimizations and test results](docs/optimizations.md): measured weaknesses and proposed fixes
 - [Research review](docs/research.md): how other projects approach this, including DOPPLERGEIST
